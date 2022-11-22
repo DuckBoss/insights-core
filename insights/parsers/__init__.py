@@ -532,13 +532,16 @@ def keyword_search(rows, **kwargs):
         'endswith': lambda s, v: s is not None and s.endswith(v),
         'lower_value': lambda s, v: None not in (s, v) and s.lower() == v.lower(),
     }
+    KEYS_TRANSLATED = '_keys_translated'
 
     @lru_cache
     def key_match(row, key, value):
         # Translate ' ' and '-' of keys in dict to '_' to match keyword arguments.
         my_row = {}
-        for my_key, val in row.items():
-            my_row[my_key.replace(' ', '_').replace('-', '_')] = val
+        if not hasattr(row, KEYS_TRANSLATED):
+            for my_key, val in row.items():
+                my_row[my_key.replace(' ', '_').replace('-', '_')] = val
+            setattr(row, KEYS_TRANSLATED, True)
         matcher_fn = matchers['default']
         if '__' in key:
             key, matcher = key.split('__', 1)
