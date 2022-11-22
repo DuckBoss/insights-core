@@ -1,7 +1,25 @@
-from functools import lru_cache
 import pkgutil
 from collections import OrderedDict
 from insights.core.dr import SkipComponent
+
+try:
+    from functools import lru_cache
+except ImportError:
+    def lru_cache(func):
+        """
+        Simple cache of arguments to output.
+        """
+        # Basically from https://dbader.org/blog/python-memoization
+        cache = dict()
+
+        def cached_function(*args):
+            if args in cache:
+                return cache[args]
+            result = func(*args)
+            cache[args] = result
+            return result
+
+        return cached_function
 
 
 __all__ = [n for (i, n, p) in pkgutil.iter_modules(__path__) if not p]
