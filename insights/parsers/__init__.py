@@ -543,7 +543,9 @@ def keyword_search(rows, **kwargs):
                 my_row[my_key.replace(' ', '_').replace('-', '_')] = val
             setattr(row, KEYS_TRANSLATED, True)
         matcher_fn = matchers['default']
-        if '__' in key:
+        if '__' not in key:
+            return key in my_row and my_row[key] == value  # Faster
+        else:
             key, matcher = key.split('__', 1)
             if matcher not in matchers:
                 # put key back the way we found it, matcher fn unchanged
