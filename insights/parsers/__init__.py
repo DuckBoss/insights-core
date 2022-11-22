@@ -1,3 +1,4 @@
+from functools import lru_cache
 import pkgutil
 from collections import OrderedDict
 from insights.core.dr import SkipComponent
@@ -532,6 +533,7 @@ def keyword_search(rows, **kwargs):
         'lower_value': lambda s, v: None not in (s, v) and s.lower() == v.lower(),
     }
 
+    @lru_cache
     def key_match(row, key, value):
         # Translate ' ' and '-' of keys in dict to '_' to match keyword arguments.
         my_row = {}
