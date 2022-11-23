@@ -2,24 +2,22 @@ import pkgutil
 from collections import OrderedDict
 from insights.core.dr import SkipComponent
 
-try:
-    from functools import lru_cache
-except ImportError:
-    def lru_cache(func):
-        """
-        Simple cache of arguments to output.
-        """
-        # Basically from https://dbader.org/blog/python-memoization
-        cache = dict()
+def cache(func):
+    """
+    Cache the results of the key_match function.
+    """
+    # We can't use lru_cache, because the first argument is 'row', whcih is a
+    # dict and is therefore unhashable.  So we use the id, because (in general)
+    # the data being checked in a parser is written once and then is read-only.
+    cache = dict()
 
-        def cached_function(*args):
-            if args in cache:
-                return cache[args]
-            result = func(*args)
-            cache[args] = result
-            return result
+    def check_key_match_cache(row, key, val):
+        tup = (id(row), key, val)
+        if tup not in cache:
+            cache[tup] = func(row, key, val)
+        return cache[tup]
 
-        return cached_function
+    return check_key_match_cache
 
 
 __all__ = [n for (i, n, p) in pkgutil.iter_modules(__path__) if not p]
@@ -196,7 +194,7 @@ def split_kv_pairs(lines, comment_char="#", filter_string=None, split_on="=", us
 
 
 def unsplit_lines(lines, cont_char='\\', keep_cont_char=False):
-    """Recombine lines having a continuation character at end.
+    r"""Recombine lines having a continuation character at end.
 
     Generator that recombines lines in the list that have the char `cont_char`
     at the end of a line.  If `cont_char` is found in a line then then
@@ -492,6 +490,11 @@ def parse_delimited_table(table_lines,
     return r
 
 
+# A cache for the transformed keys of the row dict for a keyword_search.
+# This needs to be outside keyword_search because it needs to persist across
+# uses of keyword_search.
+keyword_search_transformed_row = dict()
+
 def keyword_search(rows, **kwargs):
     """
     Takes a list of dictionaries and finds all the dictionaries where the
@@ -544,23 +547,25 @@ def keyword_search(rows, **kwargs):
     # Allows us to transform the key and do lookups like __contains and
     # __startswith
     matchers = {
-        'default': lambda s, v: s == v,
+        'equals': lambda s, v: s == v,
         'contains': lambda s, v: s is not None and v in s,
         'startswith': lambda s, v: s is not None and s.startswith(v),
         'endswith': lambda s, v: s is not None and s.endswith(v),
         'lower_value': lambda s, v: None not in (s, v) and s.lower() == v.lower(),
     }
-    KEYS_TRANSLATED = '_keys_translated'
 
-    @lru_cache
+    @cache
     def key_match(row, key, value):
         # Translate ' ' and '-' of keys in dict to '_' to match keyword arguments.
-        my_row = {}
-        if not hasattr(row, KEYS_TRANSLATED):
-            for my_key, val in row.items():
-                my_row[my_key.replace(' ', '_').replace('-', '_')] = val
-            setattr(row, KEYS_TRANSLATED, True)
-        matcher_fn = matchers['default']
+        row_id = id(row)
+        if row_id not in keyword_search_transformed_row:
+            my_row = {
+                my_key.replace(' ', '_').replace('-', '_'): val
+                for my_key, val in row.items()
+            }
+            keyword_search_transformed_row[row_id] = my_row
+        my_row = keyword_search_transformed_row[row_id]
+        matcher_fn = matchers['equals']
         if '__' not in key:
             return key in my_row and my_row[key] == value  # Faster
         else:
