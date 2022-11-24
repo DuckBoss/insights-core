@@ -3,6 +3,7 @@ from collections import OrderedDict
 from insights.core.dr import SkipComponent
 from zlib import crc32
 
+
 def dicthash(d):
     """
     Calculate a hash of a dictionary.
@@ -22,6 +23,7 @@ def dicthash(d):
         for key in sorted(d.keys())
     ))
     return hash_val
+
 
 def cache(func):
     """
@@ -515,6 +517,7 @@ def parse_delimited_table(table_lines,
 # This needs to be outside keyword_search because it needs to persist across
 # uses of keyword_search.
 keyword_search_transformed_row = dict()
+
 
 def keyword_search(rows, **kwargs):
     """
