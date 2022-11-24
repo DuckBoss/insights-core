@@ -1,6 +1,27 @@
 import pkgutil
 from collections import OrderedDict
 from insights.core.dr import SkipComponent
+from zlib import crc32
+
+def dicthash(d):
+    """
+    Calculate a hash of a dictionary.
+
+    Yeah, this isn't a great plan.  Dictionaries can change, maybe in
+    unexpected ways.  But for parsers, most of our dictionaries are written
+    once and read many times.  So we calculate the crc32 of the concatenation
+    of the keys and (stringified) values, in alphabetical order by key, and
+    use that as the hash of the dict.  This may not handle deep structures
+    well.  We don't try to cache that value within the dict, because that
+    changes the dict and some tests check the absolute contents of the dict.
+    """
+    if not isinstance(d, dict):
+        return id(d)
+    hash_val = crc32(b''.join(
+        bytes(key + str(d[key]), encoding='utf-8')
+        for key in sorted(d.keys())
+    ))
+    return hash_val
 
 def cache(func):
     """
@@ -12,7 +33,7 @@ def cache(func):
     cache = dict()
 
     def check_key_match_cache(row, key, val):
-        tup = (id(row), key, val)
+        tup = (dicthash(row), key, val)
         if tup not in cache:
             cache[tup] = func(row, key, val)
         return cache[tup]
@@ -557,25 +578,30 @@ def keyword_search(rows, **kwargs):
     @cache
     def key_match(row, key, value):
         # Translate ' ' and '-' of keys in dict to '_' to match keyword arguments.
-        row_id = id(row)
+        # The id() of a hash is not guaranteed to stay the same over time (!!)
+        # So we use our own 'dictionary hash' (see above).
+        row_id = dicthash(row)
         if row_id not in keyword_search_transformed_row:
             my_row = {
                 my_key.replace(' ', '_').replace('-', '_'): val
                 for my_key, val in row.items()
             }
             keyword_search_transformed_row[row_id] = my_row
-        my_row = keyword_search_transformed_row[row_id]
-        matcher_fn = matchers['equals']
-        if '__' not in key:
-            return key in my_row and my_row[key] == value  # Faster
         else:
-            key, matcher = key.split('__', 1)
-            if matcher not in matchers:
-                # put key back the way we found it, matcher fn unchanged
-                key = key + '__' + matcher
-            else:
-                matcher_fn = matchers[matcher]
-        return key in my_row and matcher_fn(my_row[key], value)
+            my_row = keyword_search_transformed_row[row_id]
+        # if no match function needed, fast evaluation:
+        if '__' not in key:
+            b = key in my_row and my_row[key] == value
+            return b
+        matcher_fn = matchers['equals']
+        key, matcher = key.split('__', 1)
+        if matcher not in matchers:
+            # put key back the way we found it, matcher fn unchanged
+            key = key + '__' + matcher
+        else:
+            matcher_fn = matchers[matcher]
+        b = key in my_row and matcher_fn(my_row[key], value)
+        return b
 
     data = []
     for row in rows:
