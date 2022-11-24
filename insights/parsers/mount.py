@@ -128,7 +128,8 @@ class MountEntry(AttributeAsDict):
         filesystem (str): Name of filesystem of mounted device (Deprecated, use
                 `mount_source` instead)
     """
-    pass
+    def __repr__(self):
+        return "<MountEntry '{mc}'>".format(mc=self.mount_clause)
 
 
 class MountedFileSystems(CommandParser):
