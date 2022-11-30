@@ -1,46 +1,6 @@
 import pkgutil
 from collections import OrderedDict
 from insights.core.dr import SkipComponent
-from zlib import crc32
-
-
-def dicthash(d):
-    """
-    Calculate a hash of a dictionary.
-
-    Yeah, this isn't a great plan.  Dictionaries can change, maybe in
-    unexpected ways.  But for parsers, most of our dictionaries are written
-    once and read many times.  So we calculate the crc32 of the concatenation
-    of the keys and (stringified) values, in alphabetical order by key, and
-    use that as the hash of the dict.  This may not handle deep structures
-    well.  We don't try to cache that value within the dict, because that
-    changes the dict and some tests check the absolute contents of the dict.
-    """
-    if not isinstance(d, dict):
-        return id(d)
-    hash_val = crc32(b''.join(
-        bytes(key + str(d[key]), encoding='utf-8')
-        for key in sorted(d.keys())
-    ))
-    return hash_val
-
-
-def cache(func):
-    """
-    Cache the results of the key_match function.
-    """
-    # We can't use lru_cache, because the first argument is 'row', whcih is a
-    # dict and is therefore unhashable.  So we use the id, because (in general)
-    # the data being checked in a parser is written once and then is read-only.
-    cache = dict()
-
-    def check_key_match_cache(row, key, val):
-        tup = (dicthash(row), key, val)
-        if tup not in cache:
-            cache[tup] = func(row, key, val)
-        return cache[tup]
-
-    return check_key_match_cache
 
 
 __all__ = [n for (i, n, p) in pkgutil.iter_modules(__path__) if not p]
@@ -526,7 +486,7 @@ def keyword_search(rows, **kwargs):
 
     Keys in the row data have ' ' and '-' replaced with '_', so they can
     match the keyword argument parsing.  For example, the keyword argument
-    'fix_up_path' will match a key named 'fix-up path'.
+    'fix_up_path' will match a key named 'fix-up path'. (see warning below)
 
     In addition, several suffixes can be added to the key name to do partial
     matching of values:
@@ -534,6 +494,7 @@ def keyword_search(rows, **kwargs):
     * '__contains' will test whether the data value contains the given
       value.
     * '__startswith' tests if the data value starts with the given value
+    * '__endswith' tests if the data value ends with the given value
     * '__lower_value' compares the lower-case version of the data and given
       values.
 
@@ -563,10 +524,20 @@ def keyword_search(rows, **kwargs):
          {'domain': 'root', 'type': 'soft', 'item': 'nproc', 'value': -1}]
         >>> keyword_search(rows, domain__startswith='r')
         [{'domain': 'root', 'type': 'soft', 'item': 'nproc', 'value': -1}]
+
+    Testing has shown that caching the keyword_search() function itself does
+    not result in much speed-up, but caching the row transformation does.
+
+    WARNING: this uses a cache for the transformed row (because that's an
+    expensive operation to do on every search) based on the `id()` of the row
+    and the `id()` of the rows container (list or object).  If that changes -
+    for instance, if your parser constructs rows on the fly from other data -
+    then this is likely to fail.  This will most likely be found by getting
+    spurious test failures on the use of keyword_search().  The answer is not
+    to construct rows on the fly.
     """
-    results = []
     if not kwargs:
-        return results
+        return []
 
     # Allows us to transform the key and do lookups like __contains and
     # __startswith
@@ -578,12 +549,15 @@ def keyword_search(rows, **kwargs):
         'lower_value': lambda s, v: None not in (s, v) and s.lower() == v.lower(),
     }
 
-    @cache
-    def key_match(row, key, value):
-        # Translate ' ' and '-' of keys in dict to '_' to match keyword arguments.
-        # The id() of a hash is not guaranteed to stay the same over time (!!)
-        # So we use our own 'dictionary hash' (see above).
-        row_id = dicthash(row)
+    def key_match(row, kv):
+        key, value = kv
+        # Translate ' ' and '-' of keys in dict to '_' to match keyword
+        # arguments; caching by id()s of rows and row to avoid situations
+        # where a test has dropped data from one parser object, constructed
+        # another parser object, and by chance one of the new object's rows
+        # is in the same memory location an old object's row.  This isn't
+        # perfect but it's better than simply id(row).
+        row_id = id(rows) + id(row)
         if row_id not in keyword_search_transformed_row:
             my_row = {
                 my_key.replace(' ', '_').replace('-', '_'): val
@@ -594,8 +568,7 @@ def keyword_search(rows, **kwargs):
             my_row = keyword_search_transformed_row[row_id]
         # if no match function needed, fast evaluation:
         if '__' not in key:
-            b = key in my_row and my_row[key] == value
-            return b
+            return key in my_row and my_row[key] == value
         matcher_fn = matchers['equals']
         key, matcher = key.split('__', 1)
         if matcher not in matchers:
@@ -603,11 +576,10 @@ def keyword_search(rows, **kwargs):
             key = key + '__' + matcher
         else:
             matcher_fn = matchers[matcher]
-        b = key in my_row and matcher_fn(my_row[key], value)
-        return b
+        return key in my_row and matcher_fn(my_row[key], value)
 
-    data = []
-    for row in rows:
-        if all(map(lambda kv: key_match(row, kv[0], kv[1]), kwargs.items())):
-            data.append(row)
+    data = list(filter(
+        lambda row: all(map(lambda kv: key_match(row, kv), kwargs.items())),
+        rows
+    ))
     return data
