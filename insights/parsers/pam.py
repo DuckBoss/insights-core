@@ -265,10 +265,10 @@ class PamConfEntry(object):
 
     def __getitem__(self, key):
         if key == 'control_flags':
-            return {
-                f.flag: f.value
+            return dict(
+                (f.flag, f.value)
                 for f in self.control_flags
-            }
+            )
         return getattr(self, key) or ''
 
     def items(self):

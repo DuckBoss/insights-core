@@ -559,10 +559,10 @@ def keyword_search(rows, **kwargs):
         # perfect but it's better than simply id(row).
         row_id = id(rows) + id(row)
         if row_id not in keyword_search_transformed_row:
-            my_row = {
-                my_key.replace(' ', '_').replace('-', '_'): val
+            my_row = dict(
+                (my_key.replace(' ', '_').replace('-', '_'), val)
                 for my_key, val in row.items()
-            }
+            )
             keyword_search_transformed_row[row_id] = my_row
         else:
             my_row = keyword_search_transformed_row[row_id]
