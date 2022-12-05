@@ -479,7 +479,7 @@ def parse_delimited_table(table_lines,
 keyword_search_transformed_row = dict()
 
 
-def keyword_search(rows, **kwargs):
+def keyword_search(rows, parent=None, **kwargs):
     """
     Takes a list of dictionaries and finds all the dictionaries where the
     keys and values match those found in the keyword arguments.
@@ -528,13 +528,10 @@ def keyword_search(rows, **kwargs):
     Testing has shown that caching the keyword_search() function itself does
     not result in much speed-up, but caching the row transformation does.
 
-    WARNING: this uses a cache for the transformed row (because that's an
-    expensive operation to do on every search) based on the `id()` of the row
-    and the `id()` of the rows container (list or object).  If that changes -
-    for instance, if your parser constructs rows on the fly from other data -
-    then this is likely to fail.  This will most likely be found by getting
-    spurious test failures on the use of keyword_search().  The answer is not
-    to construct rows on the fly.
+    An internal cache is useless, since the 'key' is based on something that
+    contains a dict or is otherwise unhashable.  In that case we would
+    normally attempt to store the transformed rows as an attribute, but we
+    can't store that on an object
     """
     if not kwargs:
         return []
@@ -549,26 +546,34 @@ def keyword_search(rows, **kwargs):
         'lower_value': lambda s, v: None not in (s, v) and s.lower() == v.lower(),
     }
 
+    txform_cache_attr = '_transform_cache'
+    if parent is None and hasattr(rows, '__dict__'):
+        parent = rows
+    # Uncomment this 'if' to check that all the parsers are supplying an
+    # object, somehow, that can store our transformed row cache.
+    # if parent is None:
+    #     print("Invoked with no parent arg on primitive container - use parent=self argument to cache row transform")
+    if parent is not None and hasattr(parent, txform_cache_attr):
+        txrows = getattr(parent, txform_cache_attr)
+    else:
+        # We have to store the original row, since frequently these are
+        # dict-like objects that are hard to re-create on the fly.  We then
+        # check the match on the 'tx' dict and return the 'orig' part.
+        txrows = list(
+            dict(
+                (key.replace(' ', '_').replace('-', '_'), val)
+                for key, val in row.items()
+            )
+            for row in rows
+        )
+        if parent is not None:
+            setattr(parent, txform_cache_attr, txrows)
+
     def key_match(row, kv):
         key, value = kv
-        # Translate ' ' and '-' of keys in dict to '_' to match keyword
-        # arguments; caching by id()s of rows and row to avoid situations
-        # where a test has dropped data from one parser object, constructed
-        # another parser object, and by chance one of the new object's rows
-        # is in the same memory location an old object's row.  This isn't
-        # perfect but it's better than simply id(row).
-        row_id = id(rows) + id(row)
-        if row_id not in keyword_search_transformed_row:
-            my_row = dict(
-                (my_key.replace(' ', '_').replace('-', '_'), val)
-                for my_key, val in row.items()
-            )
-            keyword_search_transformed_row[row_id] = my_row
-        else:
-            my_row = keyword_search_transformed_row[row_id]
         # if no match function needed, fast evaluation:
         if '__' not in key:
-            return key in my_row and my_row[key] == value
+            return key in row and row[key] == value
         matcher_fn = matchers['equals']
         key, matcher = key.split('__', 1)
         if matcher not in matchers:
@@ -576,10 +581,11 @@ def keyword_search(rows, **kwargs):
             key = key + '__' + matcher
         else:
             matcher_fn = matchers[matcher]
-        return key in my_row and matcher_fn(my_row[key], value)
+        return key in row and matcher_fn(row[key], value)
 
-    data = list(filter(
-        lambda row: all(map(lambda kv: key_match(row, kv), kwargs.items())),
-        rows
-    ))
+    data = list()
+    # Match on the translated row, return the original row
+    for txrow, orig_row in zip(txrows, rows):
+        if all(map(lambda kv: key_match(txrow, kv), kwargs.items())):
+            data.append(orig_row)
     return data
