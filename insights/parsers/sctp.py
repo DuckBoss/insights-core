@@ -125,7 +125,7 @@ class SCTPEps(Parser):
         (list): This function return a list of all endpoints when args search matches,
                 when args search do not match then it returns `[]`.
         """
-        return keyword_search(self.data, **args)
+        return keyword_search(self.data, parent=self, **args)
 
 
 class SCTPAscBase(Parser):
@@ -211,7 +211,7 @@ class SCTPAscBase(Parser):
         (list): This function return a list of all SCTP associations when args search matches,
                 when args search do not match then it returns `[]`.
         """
-        return keyword_search(self.data, **args)
+        return keyword_search(self.data, parent=self, **args)
 
 
 @parser(Specs.sctp_asc, IsRhel6)

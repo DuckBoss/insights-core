@@ -110,7 +110,7 @@ class VirshListAll(CommandParser):
             >>> len(output.search(id=2)) == 1
             True
         '''
-        return keyword_search(self.cols, **kw)
+        return keyword_search(self.cols, parent=self, **kw)
 
     def get_vm_state(self, vmname):
         '''Get VM state associated with vmname
