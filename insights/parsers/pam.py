@@ -205,6 +205,7 @@ class PamConfEntry(object):
     line_re = r'\s+'.join([type_re, control_re, mod_path_re]) + \
         r'(?:\s+' + mod_args_re + r')?'
     line_rex = re.compile(line_re)
+    _keys = ('service', 'interface', 'control_flags', 'module_name', 'module_args')
 
     def __init__(self, line, pamd_conf=False, service=None):
         # If not pam.d file then service is first column in
@@ -263,6 +264,9 @@ class PamConfEntry(object):
             # Line not valid - report error
             self._errors.append("Cannot parse line '{l}' as a valid pam.d entry".format(l=self._full_line))
 
+    def __contains__(self, key):
+        return key in self._keys
+
     def __getitem__(self, key):
         if key == 'control_flags':
             return dict(
@@ -272,8 +276,11 @@ class PamConfEntry(object):
         return getattr(self, key) or ''
 
     def items(self):
-        for key in ('service', 'interface', 'control_flags', 'module_name', 'module_args'):
+        for key in self._keys:
             yield (key, self[key])
+
+    def keys(self):
+        return self._keys
 
     def __repr__(self):
         return "<PamConfEntry for {svc}: {typ} {ctl} {name}{args}>".format(

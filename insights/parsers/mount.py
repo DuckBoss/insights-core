@@ -74,6 +74,9 @@ class AttributeAsDict(object):
         for k, v in self.__dict__.items():
             yield k, v
 
+    def keys(self):
+        return self.__dict__.keys()
+
 
 class MountOpts(AttributeAsDict):
     """
