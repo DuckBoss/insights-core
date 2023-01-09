@@ -526,14 +526,15 @@ def keyword_search(rows, parent=None, **kwargs):
         [{'domain': 'root', 'type': 'soft', 'item': 'nproc', 'value': -1}]
 
     Testing has shown that caching the keyword_search() function itself does
-    not result in much speed-up, but caching the row transformation does.
-
-    An internal cache is useless, since the 'key' is based on something that
-    contains a dict or is otherwise unhashable.  In that case we would
-    normally attempt to store the transformed rows as an attribute, but we
-    can't store that on an object
+    not result in much speed-up, but caching the key transformation does.  The
+    cache is stored as an attribute, either on the object storing the rows or
+    on a 'parent' object that can take an attribute (if 'rows' is a list, that
+    cannot have an attribute added to it).  (We used to store the transformed
+    dictionary of rows, but storing just the key transformations is faster.)
     """
     if not kwargs:
+        return []
+    if not rows:
         return []
 
     # Allows us to transform the key and do lookups like __contains and
@@ -553,39 +554,60 @@ def keyword_search(rows, parent=None, **kwargs):
     # object, somehow, that can store our transformed row cache.
     # if parent is None:
     #     print("Invoked with no parent arg on primitive container - use parent=self argument to cache row transform")
+    # The actual txkeys cache gets used rarely - in a basic test with a real
+    # archive it only got used eleven times.  But that's a saving...
     if parent is not None and hasattr(parent, txform_cache_attr):
-        txrows = getattr(parent, txform_cache_attr)
+        txkeys = getattr(parent, txform_cache_attr)
     else:
-        # We have to store the original row, since frequently these are
-        # dict-like objects that are hard to re-create on the fly.  We then
-        # check the match on the 'tx' dict and return the 'orig' part.
-        txrows = list(
-            dict(
-                (key.replace(' ', '_').replace('-', '_'), val)
-                for key, val in row.items()
-            )
-            for row in rows
+        # Store the translation from the search key to the key in the data.
+        # We start with the reverse transform - the key, to the transformed
+        # key.  This avoids doing the string replacement for every key in
+        # every row.  Then we invert that to map from the search term (with
+        # spaces and dashes replaced by underscores) to the key in the row
+        # data.
+        rev_txkeys = dict()
+        for row in rows:
+            for key in row.keys():
+                if key not in rev_txkeys:
+                    # Transform the term in a keyword_search() call into the
+                    # key in the rows
+                    rev_txkeys[key] = key.replace(' ', '_').replace('-', '_')
+        txkeys = dict(
+            (txkey, key)
+            for key, txkey in rev_txkeys.items()
         )
         if parent is not None:
-            setattr(parent, txform_cache_attr, txrows)
+            setattr(parent, txform_cache_attr, txkeys)
 
-    def key_match(row, kv):
-        key, value = kv
-        # if no match function needed, fast evaluation:
-        if '__' not in key:
-            return key in row and row[key] == value
-        matcher_fn = matchers['equals']
-        key, matcher = key.split('__', 1)
-        if matcher not in matchers:
-            # put key back the way we found it, matcher fn unchanged
-            key = key + '__' + matcher
+    # pre-compile the kwargs to find the matcher function and underlying key.
+    # Store these in a list of tuples for fast iteration and unpacking
+    search_terms = list()
+    for search_keyword, value in kwargs.items():
+        data_key = search_keyword
+        if '__' not in data_key:
+            matcher = 'equals'
         else:
-            matcher_fn = matchers[matcher]
-        return key in row and matcher_fn(row[key], value)
+            data_key, matcher = search_keyword.split('__', 1)
+            if matcher not in matchers:
+                # put key back the way we found it, matcher fn unchanged
+                data_key = search_keyword
+                matcher = 'equals'
+        # If the data key sought is not in the row data, then we can say for
+        # sure that the search will never match...
+        if data_key not in txkeys:
+            return []
+        search_terms.append((
+            txkeys[data_key], matcher, matchers[matcher], value
+        ))
+
+    def key_match(data_key, matcher, matcher_fn, value):
+        if matcher == 'equals':
+            return data_key in row and row[data_key] == value
+        return data_key in row and matcher_fn(row[data_key], value)
 
     data = list()
     # Match on the translated row, return the original row
-    for txrow, orig_row in zip(txrows, rows):
-        if all(map(lambda kv: key_match(txrow, kv), kwargs.items())):
-            data.append(orig_row)
+    for row in rows:
+        if all(key_match(*term) for term in search_terms):
+            data.append(row)
     return data
