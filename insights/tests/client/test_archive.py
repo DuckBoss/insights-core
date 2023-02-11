@@ -9,7 +9,8 @@ test_timestamp = '000000'
 test_hostname = 'testhostname'
 test_archive_name = 'insights-testhostname-000000'
 test_archive_dir = '/var/tmp/test/insights-testhostname-000000'
-test_obfuscated_archive_dir = '/var/tmp/test/insights-localhost-000000'
+test_obfuscated_archive_dir = '/var/tmp/test/insights-localhost-cleaned-000000'
+test_obfuscated_archive_dir_core = '/var/tmp/test/insights-localhost-core_cleaned-000000'
 test_cmd_dir = '/var/tmp/test/insights-testhostname-000000/insights_commands'
 test_tmp_dir = '/var/tmp/insights-archive-000000'
 
@@ -92,6 +93,7 @@ class TestInsightsArchive(TestCase):
         '''
         config = Mock()
         config.obfuscate_hostname = True
+        config.core_collect = False
         with patch('insights.client.archive.os.path.exists', return_value=True):
             archive = InsightsArchive(config)
         # give this a discrete value so we can check the results
@@ -104,6 +106,29 @@ class TestInsightsArchive(TestCase):
         assert result == test_obfuscated_archive_dir
         # ensure the class attr is set
         assert archive.archive_dir == test_obfuscated_archive_dir
+        # ensure the retval and attr are the same
+        assert result == archive.archive_dir
+
+    @patch('insights.client.archive.os.makedirs')
+    def test_create_archive_dir_obfuscated_core(self, makedirs, _, __):
+        '''
+        Verify archive_dir is created when it does not already exist
+        '''
+        config = Mock()
+        config.obfuscate_hostname = True
+        config.core_collect = True
+        with patch('insights.client.archive.os.path.exists', return_value=True):
+            archive = InsightsArchive(config)
+        # give this a discrete value so we can check the results
+        archive.tmp_dir = '/var/tmp/test'
+
+        with patch('insights.client.archive.os.path.exists', return_value=False):
+            result = archive.create_archive_dir()
+        makedirs.assert_called_once_with(test_obfuscated_archive_dir_core, 0o700)
+        # ensure the archive_dir is returned from the function
+        assert result == test_obfuscated_archive_dir_core
+        # ensure the class attr is set
+        assert archive.archive_dir == test_obfuscated_archive_dir_core
         # ensure the retval and attr are the same
         assert result == archive.archive_dir
 

@@ -747,9 +747,6 @@ class InsightsConfig(object):
                 raise ValueError('Cannot write to %s. Parent directory %s does not exist.' % (self.output_dir, parent_dir))
             if not os.path.isdir(parent_dir):
                 raise ValueError('Cannot write to %s. %s is not a directory.' % (self.output_dir, parent_dir))
-            if self.obfuscate:
-                if self._print_errors:
-                    sys.stdout.write('WARNING: SOSCleaner reports will be created alongside the output directory.\n')
         if self.output_file:
             if os.path.exists(self.output_file):
                 raise ValueError('File %s already exists.' % self.output_file)
@@ -758,9 +755,6 @@ class InsightsConfig(object):
                 raise ValueError('Cannot write to %s. Parent directory %s does not exist.' % (self.output_file, parent_dir))
             if not os.path.isdir(parent_dir):
                 raise ValueError('Cannot write to %s. %s is not a directory.' % (self.output_file, parent_dir))
-            if self.obfuscate:
-                if self._print_errors:
-                    sys.stdout.write('WARNING: SOSCleaner reports will be created alongside the output archive.\n')
         if self.module and not self.module.startswith('insights.client.apps.'):
             raise ValueError('You can only run modules within the namespace insights.client.apps.*')
         if self.app and not self.manifest:

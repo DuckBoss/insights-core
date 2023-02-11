@@ -23,6 +23,8 @@ from .archive import InsightsArchive
 from .support import registration_check
 from .constants import InsightsConstants as constants
 
+from insights.util.spec_processor import PostProcessor
+
 NETWORK = constants.custom_network_log_level
 LOG_FORMAT = ("%(asctime)s %(levelname)8s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -291,17 +293,18 @@ def collect(config):
 
     archive = InsightsArchive(config)
 
-    msg_name = determine_hostname(config.display_name)
+    hostname = determine_hostname(config.display_name)
     if config.core_collect:
         collection_rules = None
         dc = CoreCollector(config, archive)
     else:
         collection_rules = pc.get_conf_file()
         dc = DataCollector(config, archive)
-    logger.info('Starting to collect Insights data for %s', msg_name)
-    dc.run_collection(collection_rules, rm_conf, branch_info, blacklist_report)
-    output = dc.done(collection_rules, rm_conf)
-    return output
+
+    logger.info('Starting to collect Insights data for %s', hostname)
+    post_proc = PostProcessor(config, rm_conf, hostname)
+    dc.run_collection(collection_rules, post_proc, branch_info, blacklist_report)
+    return dc.done(collection_rules, post_proc)
 
 
 def get_connection(config):

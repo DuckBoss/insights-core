@@ -2,6 +2,7 @@ from insights.client.data_collector import DataCollector
 from insights.client.config import InsightsConfig
 from insights.client.insights_spec import InsightsCommand
 from insights.client.archive import InsightsArchive
+from insights.util.spec_processor import PostProcessor
 from mock.mock import patch, call, MagicMock
 
 
@@ -16,7 +17,8 @@ def test_omit_before_expanded_paths(InsightsFile, parse_file_spec):
 
     collection_rules = {'files': [{"file": "/etc/pam.d/vsftpd", "pattern": [], "symbolic_name": "vsftpd"}], 'commands': {}}
     rm_conf = {'files': ["/etc/pam.d/vsftpd"]}
-    data_collector.run_collection(collection_rules, rm_conf, {}, '')
+    post_proc = PostProcessor(c, rm_conf)
+    data_collector.run_collection(collection_rules, post_proc, {}, '')
     parse_file_spec.assert_not_called()
     InsightsFile.assert_not_called()
 
@@ -32,7 +34,8 @@ def test_omit_after_expanded_paths(InsightsFile, parse_file_spec):
 
     collection_rules = {'files': [{"file": "/etc/yum.repos.d/()*.*\\.repo", "pattern": [], "symbolic_name": "yum_repos_d"}], 'commands': {}}
     rm_conf = {'files': ["/etc/yum/repos.d/test.repo"]}
-    data_collector.run_collection(collection_rules, rm_conf, {}, '')
+    post_proc = PostProcessor(c, rm_conf)
+    data_collector.run_collection(collection_rules, post_proc, {}, '')
     parse_file_spec.assert_called_once()
     InsightsFile.assert_not_called()
 
@@ -51,7 +54,8 @@ def test_omit_symbolic_name(InsightsCommand, InsightsFile, parse_file_spec):
                         'commands': [{"command": "/sbin/chkconfig --list", "pattern": [], "symbolic_name": "chkconfig"}],
                         'pre_commands': []}
     rm_conf = {'files': ["vsftpd"], "commands": ["chkconfig"]}
-    data_collector.run_collection(collection_rules, rm_conf, {}, '')
+    post_proc = PostProcessor(c, rm_conf)
+    data_collector.run_collection(collection_rules, post_proc, {}, '')
     parse_file_spec.assert_not_called()
     InsightsFile.assert_not_called()
     InsightsCommand.assert_not_called()
@@ -60,9 +64,8 @@ def test_omit_symbolic_name(InsightsCommand, InsightsFile, parse_file_spec):
 @patch("insights.client.data_collector.InsightsCommand")
 @patch("insights.client.data_collector.InsightsFile")
 @patch("insights.client.data_collector.InsightsArchive")
-@patch("insights.client.data_collector.DataCollector.redact")
 @patch("insights.client.data_collector.DataCollector._write_collection_stats", MagicMock())
-def test_symbolic_name_bc(_, InsightsArchive, InsightsFile, InsightsCommand):
+def test_symbolic_name_bc(InsightsArchive, InsightsFile, InsightsCommand):
     """
     WICKED EDGE CASE: in case uploader.json is old and doesn't have symbolic names, don't crash
     """
@@ -73,11 +76,14 @@ def test_symbolic_name_bc(_, InsightsArchive, InsightsFile, InsightsCommand):
                         'commands': [{"command": "/sbin/chkconfig --list", "pattern": []}],
                         'pre_commands': []}
     rm_conf = {'files': ["vsftpd"], "commands": ["chkconfig"]}
-    data_collector.run_collection(collection_rules, rm_conf, {}, {})
+    post_proc = PostProcessor(c, rm_conf)
+    data_collector.run_collection(collection_rules, post_proc, {}, {})
     InsightsFile.assert_called_once()
     InsightsCommand.assert_called_once()
+    InsightsArchive.return_value.add_to_archive.assert_called()
     InsightsArchive.return_value.add_to_archive.assert_has_calls(
-        [call(InsightsFile.return_value), call(InsightsCommand.return_value)],
+        [call(InsightsFile.return_value, None, post_proc),
+         call(InsightsCommand.return_value, None, post_proc)],
         any_order=True)
 
 
@@ -131,7 +137,8 @@ def test_omit_after_parse_command(InsightsCommand, run_pre_command):
 
     collection_rules = {'commands': [{"command": "/sbin/ethtool -i", "pattern": [], "pre_command": "iface", "symbolic_name": "ethtool"}], 'files': [], "pre_commands": {"iface": "/sbin/ip -o link | awk -F ': ' '/.*link\\/ether/ {print $2}'"}}
     rm_conf = {'commands': ["/sbin/ethtool -i eth0"]}
-    data_collector.run_collection(collection_rules, rm_conf, {}, '')
+    post_proc = PostProcessor(c, rm_conf)
+    data_collector.run_collection(collection_rules, post_proc, {}, '')
     InsightsCommand.assert_not_called()
 
 
@@ -143,7 +150,8 @@ def test_run_collection_logs_skipped_globs(warn, parse_glob_spec):
 
     collection_rules = {'commands': [], 'files': [], 'globs': [{'glob': '/etc/yum.repos.d/*.repo', 'symbolic_name': 'yum_repos_d', 'pattern': []}]}
     rm_conf = {'files': ["/etc/yum.repos.d/test.repo"]}
-    data_collector.run_collection(collection_rules, rm_conf, {}, '')
+    post_proc = PostProcessor(c, rm_conf)
+    data_collector.run_collection(collection_rules, post_proc, {}, '')
     warn.assert_called_once_with("WARNING: Skipping file %s", "/etc/yum.repos.d/test.repo")
 
 
@@ -154,7 +162,8 @@ def test_run_collection_logs_skipped_files_by_file(warn):
 
     collection_rules = {'commands': [], 'files': [{'file': '/etc/machine-id', 'pattern': [], 'symbolic_name': 'etc_machine_id'}], 'globs': []}
     rm_conf = {'files': ["/etc/machine-id"]}
-    data_collector.run_collection(collection_rules, rm_conf, {}, '')
+    post_proc = PostProcessor(c, rm_conf)
+    data_collector.run_collection(collection_rules, post_proc, {}, '')
     warn.assert_called_once_with("WARNING: Skipping file %s", "/etc/machine-id")
 
 
@@ -165,7 +174,8 @@ def test_run_collection_logs_skipped_files_by_symbolic_name(warn):
 
     collection_rules = {'commands': [], 'files': [{'file': '/etc/machine-id', 'pattern': [], 'symbolic_name': 'etc_machine_id'}], 'globs': []}
     rm_conf = {'files': ["etc_machine_id"]}
-    data_collector.run_collection(collection_rules, rm_conf, {}, '')
+    post_proc = PostProcessor(c, rm_conf)
+    data_collector.run_collection(collection_rules, post_proc, {}, '')
     warn.assert_called_once_with("WARNING: Skipping file %s", "/etc/machine-id")
 
 
@@ -177,7 +187,8 @@ def test_run_collection_logs_skipped_files_by_wildcard(warn, parse_file_spec):
 
     collection_rules = {'commands': [], 'files': [{'file': '/etc/sysconfig/network-scripts/()*ifcfg-.*', 'pattern': [], 'symbolic_name': 'ifcfg'}], 'globs': []}
     rm_conf = {'files': ["/etc/sysconfig/network-scripts/ifcfg-enp0s3"]}
-    data_collector.run_collection(collection_rules, rm_conf, {}, '')
+    post_proc = PostProcessor(c, rm_conf)
+    data_collector.run_collection(collection_rules, post_proc, {}, '')
     warn.assert_called_once_with("WARNING: Skipping file %s", "/etc/sysconfig/network-scripts/ifcfg-enp0s3")
 
 
@@ -188,7 +199,8 @@ def test_run_collection_logs_skipped_commands_by_command(warn):
 
     collection_rules = {'commands': [{'command': '/bin/date', 'pattern': [], 'symbolic_name': 'date'}], 'files': [], 'globs': []}
     rm_conf = {'commands': ["/bin/date"]}
-    data_collector.run_collection(collection_rules, rm_conf, {}, '')
+    post_proc = PostProcessor(c, rm_conf)
+    data_collector.run_collection(collection_rules, post_proc, {}, '')
     warn.assert_called_once_with("WARNING: Skipping command %s", "/bin/date")
 
 
@@ -199,7 +211,8 @@ def test_run_collection_logs_skipped_commands_by_symbolic_name(warn):
 
     collection_rules = {'commands': [{'command': '/bin/date', 'pattern': [], 'symbolic_name': 'date'}], 'files': [], 'globs': []}
     rm_conf = {'commands': ["date"]}
-    data_collector.run_collection(collection_rules, rm_conf, {}, '')
+    post_proc = PostProcessor(c, rm_conf)
+    data_collector.run_collection(collection_rules, post_proc, {}, '')
     warn.assert_called_once_with("WARNING: Skipping command %s", "/bin/date")
 
 
@@ -211,5 +224,6 @@ def test_run_collection_logs_skipped_commands_by_pre_command(warn, parse_command
 
     collection_rules = {'commands': [{'command': '/sbin/ethtool', 'pattern': [], 'pre_command': 'iface', 'symbolic_name': 'ethtool'}], 'files': [], 'globs': [], 'pre_commands': {'iface': '/sbin/ip -o link | awk -F \': \' \'/.*link\\/ether/ {print $2}\''}}
     rm_conf = {'commands': ["/sbin/ethtool enp0s3"]}
-    data_collector.run_collection(collection_rules, rm_conf, {}, '')
+    post_proc = PostProcessor(c, rm_conf)
+    data_collector.run_collection(collection_rules, post_proc, {}, '')
     warn.assert_called_once_with("WARNING: Skipping command %s", "/sbin/ethtool enp0s3")

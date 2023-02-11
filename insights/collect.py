@@ -355,7 +355,22 @@ def create_archive(path, remove_path=True):
     return archive_path
 
 
-def collect(manifest=default_manifest, tmp_path=None, compress=False, rm_conf=None, client_timeout=None):
+def generate_relative_path():
+    """
+    Creates the relative path to store the component output.
+    the original path is removed.
+    """
+    try:
+        hostname = call("hostname -f", env=SAFE_ENV).strip()
+    except CalledProcessError:
+        # problem calling hostname -f
+        hostname = call("hostname", env=SAFE_ENV).strip()
+    suffix = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    return "insights-%s-%s" % (hostname, suffix)
+
+
+def collect(manifest=default_manifest, tmp_path=None, compress=False,
+            relative_path=None, post_proc=None, client_timeout=None):
     """
     This is the collection entry point. It accepts a manifest, a temporary
     directory in which to store output, and a boolean for optional compression.
@@ -363,15 +378,16 @@ def collect(manifest=default_manifest, tmp_path=None, compress=False, rm_conf=No
     Args:
         manifest (str or dict): json document or dictionary containing the
             collection manifest. See default_manifest for an example.
-        tmp_path (str): The temporary directory that will be used to create a
+        tmp_path (str): The temporary directory that will be used to create the
             working directory for storing component output as well as the final
             tar.gz if one is generated.
         compress (boolean): True to create a tar.gz and remove the original
             workspace containing output. False to leave the workspace without
             creating a tar.gz
-        rm_conf (dict): Client-provided python dict containing keys
-            "commands", "files", and "keywords", to be injected
-            into the manifest blacklist.
+        relative_path (str): The relative working directory for storing
+            component output.
+        post_proc (PostProcessor): The Post Processor that will be used to
+            redact and obfuscate the collected component as per configurations.
         client_timeout (int): Client-provided command timeout value
     Returns:
         (str, dict): The full path to the created tar.gz or workspace.
@@ -383,7 +399,8 @@ def collect(manifest=default_manifest, tmp_path=None, compress=False, rm_conf=No
     manifest = load_manifest(manifest)
     client = manifest.get("client", {})
     plugins = manifest.get("plugins", {})
-    run_strategy = client.get("run_strategy", {"name": "parallel"})
+    # run in "serial" mode by default
+    run_strategy = client.get("run_strategy", {"name": "serial"})
 
     load_packages(plugins.get("packages", []))
     apply_default_enabled(plugins)
@@ -397,15 +414,6 @@ def collect(manifest=default_manifest, tmp_path=None, compress=False, rm_conf=No
             client['context']['args']['timeout'] = client_timeout
         except LookupError:
             log.warning('Could not set timeout option.')
-    rm_conf = rm_conf or {}
-    apply_blacklist(rm_conf)
-    for component in rm_conf.get('components', []):
-        if not dr.get_component_by_name(component):
-            log.warning('WARNING: Unknown component in blacklist: %s' % component)
-        else:
-            dr.set_enabled(component, enabled=False)
-            BLACKLISTED_SPECS.append(component.split('.')[-1])
-            log.warning('WARNING: Skipping component: %s', component)
 
     to_persist = get_to_persist(client.get("persist", set()))
 
@@ -418,14 +426,6 @@ def collect(manifest=default_manifest, tmp_path=None, compress=False, rm_conf=No
         # problem parsing the filters
         log.debug("Could not parse filters: %s", str(e))
 
-    try:
-        hostname = call("hostname -f", env=SAFE_ENV).strip()
-    except CalledProcessError:
-        # problem calling hostname -f
-        hostname = call("hostname", env=SAFE_ENV).strip()
-    suffix = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-    relative_path = "insights-%s-%s" % (hostname, suffix)
-    tmp_path = tmp_path or tempfile.gettempdir()
     output_path = os.path.join(tmp_path, relative_path)
     fs.ensure_path(output_path)
     fs.touch(os.path.join(output_path, "insights_archive.txt"))
@@ -433,8 +433,13 @@ def collect(manifest=default_manifest, tmp_path=None, compress=False, rm_conf=No
     broker = dr.Broker()
     ctx = create_context(client.get("context", {}))
     broker[ctx.__class__] = ctx
-
     parallel = run_strategy.get("name") == "parallel"
+    if post_proc:
+        if post_proc.obfuscate and parallel:
+            log.warning("Parallel collection is not supported when 'obfuscate' is enabled")
+            parallel = False
+        broker['post_proc'] = post_proc
+
     pool_args = run_strategy.get("args", {})
     with get_pool(parallel, "insights-collector-pool", pool_args) as pool:
         h = Hydration(output_path, pool=pool)
@@ -549,7 +554,9 @@ def main():
         manifest = default_manifest
 
     out_path = args.out_path or tempfile.gettempdir()
-    archive, errors = collect(manifest, out_path, compress=args.compress)
+    relative_path = generate_relative_path()
+    archive, errors = collect(manifest, out_path, relative_path=relative_path,
+                              compress=args.compress)
     print(archive)
 
 

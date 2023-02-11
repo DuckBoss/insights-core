@@ -53,10 +53,11 @@ class InsightsArchive(object):
 
         # We should not hint the hostname in the archive if it has to be obfuscated
         if config.obfuscate_hostname:
-            hostname = "localhost"
+            hostname = 'localhost-cleaned'
+            if config.core_collect:
+                hostname = 'localhost-core_cleaned'
         else:
             hostname = determine_hostname()
-
         self.archive_name = ("insights-%s-%s" %
                              (hostname,
                               time.strftime("%Y%m%d%H%M%S")))
@@ -208,7 +209,7 @@ class InsightsArchive(object):
             logger.debug("Deleting %s", self.archive_tmp_dir)
             shutil.rmtree(self.archive_tmp_dir, True)
 
-    def add_to_archive(self, spec):
+    def add_to_archive(self, spec, obfs=None, post_proc=None):
         '''
         Add files and commands to archive
         Use InsightsSpec.get_output() to get data
@@ -224,6 +225,9 @@ class InsightsArchive(object):
         output = spec.get_output()
         if output and not any(re.search(rg, output) for rg in ab_regex):
             write_data_to_file(output, archive_path)
+            if obfs and post_proc:
+                # Redact and Obfuscate for data collection
+                post_proc.process_file(archive_path, obfs)
 
     def add_metadata_to_archive(self, metadata, meta_path):
         '''
