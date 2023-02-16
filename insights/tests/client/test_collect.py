@@ -340,7 +340,6 @@ def test_file_result(post_proc, get_branch_info, try_disk, raw_config_parser, da
         collection_rules = try_disk.return_value.copy()
         collection_rules.update({"file": args[0]})
 
-        rm_conf = {"files": removed_files}
         branch_info = get_branch_info.return_value
 
         data_collector.return_value.run_collection.assert_called_once_with(collection_rules, post_proc, branch_info)
