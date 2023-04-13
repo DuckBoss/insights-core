@@ -43,6 +43,7 @@ def get_file_handler(config):
     file_handler = logging.handlers.RotatingFileHandler(
         log_file, backupCount=3)
     file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    print("test")
     return file_handler
 
 
